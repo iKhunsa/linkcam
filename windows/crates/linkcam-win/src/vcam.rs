@@ -42,11 +42,12 @@ pub fn stage_dll(exe_dir: &Path) -> Result<PathBuf> {
     Ok(staged)
 }
 
-/// PowerShell command line that elevates once (UAC) and runs `script`.
-pub fn elevated_command(script: &str) -> String {
-    // The script is wrapped in single quotes twice (outer -Command, inner -ArgumentList).
-    let quoted = script.replace('\'', "''");
-    format!("Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-Command','{quoted}'")
+/// PowerShell command line that elevates once (UAC) and runs the script file.
+pub fn elevated_command(script_path: &Path) -> String {
+    let file = script_path.display().to_string().replace('\'', "''");
+    format!(
+        "Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','{file}'"
+    )
 }
 
 fn registration_script(dll: &Path) -> String {
@@ -57,9 +58,22 @@ fn registration_script(dll: &Path) -> String {
     )
 }
 
+/// Writes `script` to a file next to the channel and runs it elevated (one UAC
+/// prompt). A file avoids every quoting problem of `-Command`; the transcript
+/// next to it shows what the elevated step did.
 fn run_elevated(script: &str) -> Result<()> {
+    let path = channel_path().with_file_name("elevated-step.ps1");
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| CameraError::WriteFailed(e.to_string()))?;
+    }
+    let log = path.with_extension("log");
+    let body = format!(
+        "Start-Transcript -Path '{}' -Force | Out-Null\r\n{script}\r\nStop-Transcript | Out-Null\r\n",
+        log.display()
+    );
+    std::fs::write(&path, body).map_err(|e| CameraError::WriteFailed(e.to_string()))?;
     let status = Command::new("powershell")
-        .args(["-NoProfile", "-Command", &elevated_command(script)])
+        .args(["-NoProfile", "-Command", &elevated_command(&path)])
         .status()
         .map_err(|e| CameraError::WriteFailed(format!("powershell: {e}")))?;
     if status.success() {
@@ -152,9 +166,10 @@ mod tests {
     }
 
     #[test]
-    fn elevated_command_requests_runas_and_escapes_quotes() {
-        let command = elevated_command("echo 'hi'");
+    fn elevated_command_runs_the_script_file_as_administrator() {
+        let command = elevated_command(Path::new(r"C:\Users\Public\LinkCam\step's.ps1"));
         assert!(command.contains("-Verb RunAs"));
-        assert!(command.contains("''hi''"));
+        assert!(command.contains("'-File'"));
+        assert!(command.contains("step''s.ps1"), "single quotes are doubled: {command}");
     }
 }

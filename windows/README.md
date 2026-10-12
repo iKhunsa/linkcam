@@ -43,6 +43,7 @@ linkcam list                    dispositivos de captura
 | Preview en vivo, selector de resolución 4K30 … 720p24 (modos nativos de la cámara) | ✅ |
 | Zoom 1×–4× (recorte real en cámara) | ✅ |
 | Modos DeskView / Overhead (cambian la imagen, restauran a normal) | ✅ |
+| Una sola app puede usar la cámara física a la vez (Discord, Teams…): si otra la tiene, LinkCam lo avisa y reconecta cuando la libera | ℹ️ |
 | Whiteboard (`04 01`, confirmado contra el controlador oficial; requiere los marcadores de esquina) | ✅ comando verificado |
 | Auto Framing (`07 10`, confirmado contra el controlador oficial; el encuadre necesita una persona) | ✅ comando verificado |
 | Brillo / contraste / saturación / nitidez / balance de blancos | ✅ |
@@ -51,7 +52,7 @@ linkcam list                    dispositivos de captura
 | Gestos propios (mano → atajo / lanzar app / comando de cámara), editor en la GUI | ✅ validado con fotos reales de manos; **falta probarlo con tu mano en vivo** |
 | Efecto de fondo (desenfoque con segmentación de personas), texto superpuesto | ✅ en preview, fotos, grabaciones y cámara virtual |
 | Audio en grabaciones + reducción de ruido (compuerta espectral) | ✅ pista AAC en el MP4. Usa el micrófono de la cámara si existe; la Link 2C de este PC no expone uno, así que elige otro en *Audio*. No reencamina el micrófono en vivo |
-| Cámara virtual «LinkCam Virtual Camera» (Windows 11, Media Foundation) | ✅ fuente de medios validada leyéndola con un `SourceReader`; **el registro COM necesita aprobar el aviso de administrador una vez** (`linkcam vcam install`) |
+| Cámara virtual «LinkCam Virtual Camera» (Windows 11, Media Foundation) | ✅ verificada de punta a punta por Frame Server (121 fotogramas con los colores exactos). **Se registra una vez con aprobación de administrador** (`linkcam vcam install`) |
 | Pan / tilt digital | ❌ la firmware de la 2C ignora los controles UVC (ver `docs/xu-map-link2c.md`) |
 | Interruptores de gestos del oficial (Auto Framing/Whiteboard/Zoom) | no cambian ningún selector XU: son de la app, no hay nada que replicar |
 | Reencaminar el micrófono en vivo con reducción de ruido | ❌ requeriría un driver de audio virtual |

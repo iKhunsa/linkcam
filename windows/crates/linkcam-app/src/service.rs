@@ -248,7 +248,7 @@ impl Worker {
                 Ok(Some(frame)) => self.on_frame(frame, camera),
                 Ok(None) => {}
                 Err(error) => {
-                    self.emit(Event::Error(error.to_string()));
+                    self.emit(Event::Error(describe_stream_error(&error)));
                     camera.stop_streaming();
                     // Reopen the whole device: the camera may have been unplugged.
                     return self.wait_while_serving_requests(RECONNECT_DELAY);
@@ -632,6 +632,18 @@ fn denoise_interleaved(samples: &[i16], reducers: &mut [NoiseReducer]) -> Vec<i1
         }
     }
     out
+}
+
+/// Turns the driver's "no hardware resources" failure, which is what another
+/// application holding the camera produces, into something actionable.
+fn describe_stream_error(error: &linkcam_core::CameraError) -> String {
+    let text = error.to_string();
+    if text.contains("0xC00D3704") || text.contains("lack of hardware resources") {
+        "The camera is in use by another application (for example Discord). Stop its video and LinkCam reconnects."
+            .to_string()
+    } else {
+        text
+    }
 }
 
 fn describe(action: &Action) -> String {

@@ -36,6 +36,7 @@ fn main() {
         "snap" => snap(),
         "formats" => formats(),
         "mic" => mic(),
+        "mic-record" => mic_record(),
         "ptz-test" => ptz_test(),
         "poke" => poke(),
         "mode-sweep" => mode_sweep(),
@@ -476,4 +477,55 @@ fn mic() -> Result<(), String> {
     let rms = (samples.iter().map(|s| (*s as f64).powi(2)).sum::<f64>() / samples.len().max(1) as f64).sqrt();
     println!("{} samples, rms {rms:.1}", samples.len());
     Ok(())
+}
+
+/// Records `<seconds>` of a real microphone (with the app's noise reduction) plus
+/// synthetic video into an MP4 and checks both tracks are present.
+fn mic_record() -> Result<(), String> {
+    use linkcam_core::audio::NoiseReducer;
+    use linkcam_win::preview::Frame;
+    let name = std::env::args().nth(2).unwrap_or_default();
+    let seconds: u64 = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(3);
+    let path = std::env::temp_dir().join("linkcam-mic-record.mp4");
+
+    let mic = linkcam_win::audio::MicCapture::start(&name).map_err(|e| e.to_string())?;
+    let format = mic.format();
+    let mut recorder = linkcam_win::record::Recorder::create(&path, 640, 360, 30, Some(format))
+        .map_err(|e| e.to_string())?;
+    let mut reducers = [NoiseReducer::new(2.0), NoiseReducer::new(2.0)];
+    let frame = Frame { width: 640, height: 360, rgba: vec![60; 640 * 360 * 4] };
+
+    let (mut raw_energy, mut clean_energy, mut count) = (0f64, 0f64, 0usize);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    while std::time::Instant::now() < until {
+        recorder.write_frame(&frame).map_err(|e| e.to_string())?;
+        let samples = mic.drain();
+        if !samples.is_empty() {
+            let frames = samples.len() / 2;
+            let channel =
+                |c: usize| -> Vec<f32> { (0..frames).map(|f| samples[f * 2 + c] as f32 / 32768.0).collect() };
+            let cleaned: Vec<Vec<f32>> = (0..2).map(|c| reducers[c].process(&channel(c))).collect();
+            let produced = cleaned[0].len().min(cleaned[1].len());
+            let mut out = Vec::with_capacity(produced * 2);
+            for (left, right) in cleaned[0].iter().zip(&cleaned[1]).take(produced) {
+                out.push((left.clamp(-1.0, 1.0) * 32767.0) as i16);
+                out.push((right.clamp(-1.0, 1.0) * 32767.0) as i16);
+            }
+            raw_energy += samples.iter().map(|s| (*s as f64).powi(2)).sum::<f64>();
+            clean_energy += out.iter().map(|s| (*s as f64).powi(2)).sum::<f64>();
+            count += samples.len();
+            recorder.write_audio(&out).map_err(|e| e.to_string())?;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(33));
+    }
+    recorder.finish().map_err(|e| e.to_string())?;
+    let tracks = linkcam_win::record::describe_file(&path).map_err(|e| e.to_string())?;
+    let rms = |e: f64| (e / count.max(1) as f64).sqrt();
+    println!("captured {count} samples; rms raw={:.1} cleaned={:.1}", rms(raw_energy), rms(clean_energy));
+    println!("file {} -> video={}, audio={}", path.display(), tracks.0, tracks.1);
+    if tracks == (true, true) && count > 0 {
+        Ok(())
+    } else {
+        Err("missing track or no audio captured".into())
+    }
 }

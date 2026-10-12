@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/linkcam-core",
+    "crates/linkcam-win",
+    "crates/linkcam-vision",
+    "crates/linkcam-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["LinkCam contributors"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+windows = "0.62"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

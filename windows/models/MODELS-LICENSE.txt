@@ -1,0 +1,4 @@
+The ONNX models in this folder are the MediaPipe palm detection and hand landmark
+models as packaged by the OpenCV Model Zoo (https://github.com/opencv/opencv_zoo),
+distributed under the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+Original work: Google LLC, MediaPipe (https://github.com/google-ai-edge/mediapipe).

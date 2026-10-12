@@ -1,0 +1,15 @@
+[package]
+name = "linkcam-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "linkcam"
+path = "src/main.rs"
+
+[dependencies]
+linkcam-core = { path = "../linkcam-core" }
+linkcam-win = { path = "../linkcam-win" }
+linkcam-vision = { path = "../linkcam-vision" }
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow"] }

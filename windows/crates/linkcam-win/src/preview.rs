@@ -166,6 +166,27 @@ fn bgrx_to_rgba(bytes: &[u8], width: usize, height: usize, step: usize) -> Optio
     Some(Frame { width: out_w, height: out_h, rgba })
 }
 
+/// Friendly names of every capture device of `source_type`.
+pub(crate) fn list_source_names(source_type: &windows::core::GUID) -> Vec<String> {
+    let mut attributes = None;
+    if unsafe { MFCreateAttributes(&mut attributes, 1) }.is_err() {
+        return Vec::new();
+    }
+    let Some(attributes): Option<IMFAttributes> = attributes else { return Vec::new() };
+    if unsafe { attributes.SetGUID(&MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, source_type) }.is_err() {
+        return Vec::new();
+    }
+    let mut devices: *mut Option<IMFActivate> = std::ptr::null_mut();
+    let mut count = 0u32;
+    if unsafe { MFEnumDeviceSources(&attributes, &mut devices, &mut count) }.is_err() {
+        return Vec::new();
+    }
+    let activates = unsafe { std::slice::from_raw_parts(devices, count as usize) };
+    let names = activates.iter().flatten().map(friendly_name).collect();
+    unsafe { CoTaskMemFree(Some(devices.cast())) };
+    names
+}
+
 /// Opens the first capture device of `source_type` (video or audio) whose name matches.
 pub(crate) fn open_source(name_part: &str, source_type: &windows::core::GUID) -> Result<IMFMediaSource> {
     let mut attributes = None;

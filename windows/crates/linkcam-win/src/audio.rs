@@ -1,7 +1,7 @@
 //! Microphone capture through a Media Foundation source reader on its own
 //! thread; the app drains the PCM it produces while recording.
 
-use crate::preview::open_source;
+use crate::preview::{list_source_names, open_source};
 use crate::ComGuard;
 use linkcam_core::{CameraError, Result};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,6 +18,8 @@ pub struct AudioFormat {
     pub channels: u16,
 }
 
+/// Name fragment of the camera's microphone endpoint.
+const CAMERA_MIC_NAME: &str = "Insta360";
 const SAMPLE_RATE: u32 = 48_000;
 const CHANNELS: u16 = 2;
 const BITS_PER_SAMPLE: u32 = 16;
@@ -36,7 +38,9 @@ pub struct MicCapture {
 }
 
 impl MicCapture {
-    /// Starts capturing from the first microphone whose name contains `name_part`.
+    /// Starts capturing from the microphone whose name contains `name_part`.
+    /// An empty `name_part` means automatic: the camera's own microphone when it
+    /// has one, otherwise the first available.
     pub fn start(name_part: &str) -> Result<Self> {
         let (chunk_tx, chunk_rx) = channel();
         let (ready_tx, ready_rx) = sync_channel::<Result<AudioFormat>>(1);
@@ -97,10 +101,27 @@ impl Drop for MfSession {
     }
 }
 
+/// Names of the microphones Media Foundation can capture from.
+pub fn list_microphones() -> Vec<String> {
+    let _com = ComGuard::init();
+    if unsafe { MFStartup(MF_VERSION, MFSTARTUP_FULL) }.is_err() {
+        return Vec::new();
+    }
+    let names = list_source_names(&MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_GUID);
+    let _ = unsafe { MFShutdown() };
+    names
+}
+
 fn open_reader(name_part: &str) -> Result<(IMFSourceReader, MfSession)> {
     unsafe { MFStartup(MF_VERSION, MFSTARTUP_FULL) }.map_err(fail("MFStartup"))?;
     let session = MfSession;
-    let source = open_source(name_part, &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_GUID)?;
+    let source = if name_part.is_empty() {
+        // Automatic: prefer the camera's own microphone, else anything that works.
+        open_source(CAMERA_MIC_NAME, &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_GUID)
+            .or_else(|_| open_source("", &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_GUID))?
+    } else {
+        open_source(name_part, &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_GUID)?
+    };
     let reader =
         unsafe { MFCreateSourceReaderFromMediaSource(&source, None) }.map_err(fail("source reader"))?;
 

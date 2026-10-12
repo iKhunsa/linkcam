@@ -50,10 +50,12 @@ impl EffectsConfig {
 }
 
 /// Microphone options for recordings.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AudioConfig {
     pub record_microphone: bool,
+    /// Name fragment of the microphone to use; empty = automatic.
+    pub microphone: String,
     pub noise_reduction: bool,
     /// Noise gate strength, 1.0 (mild) ..= 3.0 (strong).
     pub noise_strength: f32,
@@ -61,7 +63,12 @@ pub struct AudioConfig {
 
 impl Default for AudioConfig {
     fn default() -> Self {
-        Self { record_microphone: true, noise_reduction: false, noise_strength: 2.0 }
+        Self {
+            record_microphone: true,
+            microphone: String::new(),
+            noise_reduction: false,
+            noise_strength: 2.0,
+        }
     }
 }
 

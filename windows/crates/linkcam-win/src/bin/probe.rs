@@ -35,6 +35,7 @@ fn main() {
         "try-mode" => try_mode(),
         "snap" => snap(),
         "formats" => formats(),
+        "mic" => mic(),
         "ptz-test" => ptz_test(),
         "poke" => poke(),
         "mode-sweep" => mode_sweep(),
@@ -460,5 +461,19 @@ fn formats() -> Result<(), String> {
     for format in capture.available_formats() {
         println!("  {}x{} @ {} fps  ({})", format.width, format.height, format.fps, format.label());
     }
+    Ok(())
+}
+
+/// Captures two seconds from the microphone and prints how much signal arrived.
+fn mic() -> Result<(), String> {
+    println!("microphones: {:?}", linkcam_win::audio::list_microphones());
+    // No argument = automatic selection, like the app.
+    let name = std::env::args().nth(2).unwrap_or_default();
+    let capture = linkcam_win::audio::MicCapture::start(&name).map_err(|e| e.to_string())?;
+    println!("format: {:?}", capture.format());
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    let samples = capture.drain();
+    let rms = (samples.iter().map(|s| (*s as f64).powi(2)).sum::<f64>() / samples.len().max(1) as f64).sqrt();
+    println!("{} samples, rms {rms:.1}", samples.len());
     Ok(())
 }

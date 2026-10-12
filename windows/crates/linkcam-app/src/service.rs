@@ -400,8 +400,17 @@ impl Worker {
         };
         let fps = camera.current_format().map_or(30, |f| f.fps);
         // The microphone is optional: without it the recording is video only.
-        let mic =
-            if self.config.audio.record_microphone { MicCapture::start(MIC_NAME_PART).ok() } else { None };
+        let mic = if self.config.audio.record_microphone {
+            match MicCapture::start(&self.config.audio.microphone) {
+                Ok(mic) => Some(mic),
+                Err(error) => {
+                    self.emit(Event::Notice(format!("Recording without audio: {error}")));
+                    None
+                }
+            }
+        } else {
+            None
+        };
         let audio_format = mic.as_ref().map(MicCapture::format);
         match Recorder::create(&path, frame.width, frame.height, fps, audio_format) {
             Ok(recorder) => {
@@ -434,7 +443,7 @@ impl Worker {
             return;
         }
         let channels = mic.format().channels as usize;
-        let audio = self.config.audio;
+        let audio = self.config.audio.clone();
         let cleaned = if audio.noise_reduction {
             if self.reducers.len() != channels {
                 self.reducers = (0..channels).map(|_| NoiseReducer::new(audio.noise_strength)).collect();
@@ -601,9 +610,6 @@ impl Worker {
         }
     }
 }
-
-/// Friendly-name fragment of the camera's built-in microphone.
-const MIC_NAME_PART: &str = "Insta360";
 
 /// Runs one reducer per channel over interleaved 16-bit PCM.
 fn denoise_interleaved(samples: &[i16], reducers: &mut [NoiseReducer]) -> Vec<i16> {

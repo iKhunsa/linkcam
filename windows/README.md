@@ -50,7 +50,7 @@ linkcam list                    dispositivos de captura
 | Foto a resolución completa, grabación H.264/MP4 | ✅ |
 | Gestos propios (mano → atajo / lanzar app / comando de cámara), editor en la GUI | ✅ validado con fotos reales de manos; **falta probarlo con tu mano en vivo** |
 | Efecto de fondo (desenfoque con segmentación de personas), texto superpuesto | ✅ en preview, fotos, grabaciones y cámara virtual |
-| Audio en grabaciones (micrófono de la cámara) + reducción de ruido (compuerta espectral) | ✅ pista AAC en el MP4; no reencamina el micrófono en vivo |
+| Audio en grabaciones + reducción de ruido (compuerta espectral) | ✅ pista AAC en el MP4. Usa el micrófono de la cámara si existe; la Link 2C de este PC no expone uno, así que elige otro en *Audio*. No reencamina el micrófono en vivo |
 | Cámara virtual «LinkCam Virtual Camera» (Windows 11, Media Foundation) | ✅ fuente de medios validada leyéndola con un `SourceReader`; **el registro COM necesita aprobar el aviso de administrador una vez** (`linkcam vcam install`) |
 | Pan / tilt digital | ❌ la firmware de la 2C ignora los controles UVC (ver `docs/xu-map-link2c.md`) |
 | Interruptores de gestos del oficial (Auto Framing/Whiteboard/Zoom) | no cambian ningún selector XU: son de la app, no hay nada que replicar |

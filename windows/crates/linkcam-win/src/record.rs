@@ -244,3 +244,37 @@ impl Drop for Recorder {
         let _ = self.finalize();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Writes synthetic video + PCM and checks the MP4 holds both tracks.
+    #[test]
+    fn recording_with_audio_produces_video_and_audio_tracks() {
+        let path = std::env::temp_dir().join("linkcam-record-test.mp4");
+        let _ = std::fs::remove_file(&path);
+        let format = AudioFormat { sample_rate: 48_000, channels: 2 };
+        let mut recorder = Recorder::create(&path, 640, 360, 30, Some(format)).unwrap();
+
+        let frame = Frame { width: 640, height: 360, rgba: vec![90; 640 * 360 * 4] };
+        for step in 0..60 {
+            recorder.write_frame(&frame).unwrap();
+            // 1/30 s of a 440 Hz tone, interleaved stereo.
+            let chunk: Vec<i16> = (0..1600)
+                .flat_map(|i| {
+                    let t = (step * 1600 + i) as f32 / 48_000.0;
+                    let v = ((t * 440.0 * std::f32::consts::TAU).sin() * 8000.0) as i16;
+                    [v, v]
+                })
+                .collect();
+            recorder.write_audio(&chunk).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        recorder.finish().unwrap();
+
+        let size = std::fs::metadata(&path).unwrap().len();
+        assert!(size > 10_000, "file is {size} bytes");
+        assert_eq!(describe_file(&path).unwrap(), (true, true));
+    }
+}

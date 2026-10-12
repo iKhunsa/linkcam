@@ -193,8 +193,24 @@ impl LinkCamApp {
 
     fn audio_section(&mut self, ui: &mut Ui) {
         egui::CollapsingHeader::new("Audio").default_open(false).show(ui, |ui| {
-            let mut audio = self.config.audio;
+            let mut audio = self.config.audio.clone();
             ui.checkbox(&mut audio.record_microphone, "Record microphone");
+            ui.add_enabled_ui(audio.record_microphone, |ui| {
+                let current = if audio.microphone.is_empty() {
+                    "Automatic".to_string()
+                } else {
+                    audio.microphone.clone()
+                };
+                egui::ComboBox::from_id_salt("microphone").selected_text(current).width(220.0).show_ui(
+                    ui,
+                    |ui| {
+                        ui.selectable_value(&mut audio.microphone, String::new(), "Automatic");
+                        for name in &self.microphones {
+                            ui.selectable_value(&mut audio.microphone, name.clone(), name);
+                        }
+                    },
+                );
+            });
             ui.add_enabled(
                 audio.record_microphone,
                 egui::Checkbox::new(&mut audio.noise_reduction, "Noise reduction"),
@@ -209,7 +225,7 @@ impl LinkCamApp {
                     .color(theme::MUTED),
             );
             if audio != self.config.audio {
-                self.config.audio = audio;
+                self.config.audio = audio.clone();
                 self.service.send(Request::SetAudio(audio));
                 self.save_config();
             }

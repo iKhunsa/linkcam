@@ -4,6 +4,7 @@
 //! COM objects are apartment-bound: create and use a `WinCamera` on a
 //! single thread (the app runs it on a dedicated camera thread).
 
+pub mod audio;
 mod camera;
 mod com;
 mod controls;
@@ -19,3 +20,5 @@ pub use xu::{XuAccess, XuClient, XuGuid, KNOWN_XU_GUIDS};
 pub mod keys;
 pub mod preview;
 pub mod record;
+pub mod vcam;
+pub mod vcam_channel;

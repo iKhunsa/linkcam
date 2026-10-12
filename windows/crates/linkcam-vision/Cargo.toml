@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 linkcam-core = { path = "../linkcam-core" }
 tract-onnx = "0.23"
+font8x8 = "0.3"
 
 [dev-dependencies]
 png = "0.17"

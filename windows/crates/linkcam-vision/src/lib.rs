@@ -8,13 +8,16 @@
 
 pub mod classifier;
 pub mod dispatcher;
+pub mod effects;
 pub mod geometry;
 pub mod models;
+pub mod segmentation;
 
 pub use classifier::classify;
 pub use dispatcher::{Dispatcher, Fired};
 pub use geometry::{Hand, Landmark, HAND_LANDMARKS};
 pub use models::{HandModels, ModelError, Roi};
+pub use segmentation::{Mask, PersonSegmenter};
 
 /// Borrowed RGBA image (row-major, 4 bytes per pixel).
 #[derive(Debug, Clone, Copy)]

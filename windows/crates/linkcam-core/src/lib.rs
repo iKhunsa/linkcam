@@ -3,6 +3,7 @@
 //!
 //! Nothing here touches Windows APIs, so everything is unit-testable.
 
+pub mod audio;
 pub mod config;
 pub mod device;
 pub mod error;
@@ -11,6 +12,7 @@ pub mod gesture;
 pub mod modes;
 pub mod protocol;
 pub mod units;
+pub mod vcam;
 
 pub use device::{CameraDevice, CameraState, ControlValue, FakeCamera, ImageControl};
 pub use error::{CameraError, Result};

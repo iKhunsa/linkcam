@@ -5,6 +5,7 @@ members = [
     "crates/linkcam-win",
     "crates/linkcam-vision",
     "crates/linkcam-app",
+    "crates/linkcam-vcam",
 ]
 
 [workspace.package]

@@ -21,6 +21,7 @@ USAGE:
   linkcam list                    list capture devices
   linkcam gestures                run the gesture engine in the console
   linkcam autostart on|off|status start LinkCam with Windows
+  linkcam vcam install|uninstall|status|run <s>|test   virtual camera (Windows 11)
   linkcam selftest                exercise mode/zoom/resolution/snapshot/recording
   linkcam help";
 
@@ -38,6 +39,7 @@ pub enum Command {
     Record { seconds: u64, path: Option<String> },
     Autostart(Option<bool>),
     Selftest,
+    Vcam(crate::vcam_cli::Action),
     List,
     Gestures,
     Help,
@@ -93,6 +95,22 @@ pub fn parse(args: &[String]) -> Result<Command> {
         }),
         Some("formats") => Ok(Command::Formats),
         Some("selftest") => Ok(Command::Selftest),
+        Some("vcam") => {
+            use crate::vcam_cli::Action;
+            match rest.get(1).copied() {
+                Some("install") => Ok(Command::Vcam(Action::Install)),
+                Some("uninstall") => Ok(Command::Vcam(Action::Uninstall)),
+                Some("status") | None => Ok(Command::Vcam(Action::Status)),
+                Some("test") => Ok(Command::Vcam(Action::Test)),
+                Some("run") => {
+                    let seconds = rest.get(2).and_then(|s| s.parse().ok()).unwrap_or(3600);
+                    Ok(Command::Vcam(Action::Run(seconds)))
+                }
+                Some(other) => {
+                    Err(invalid(format!("vcam expects install|uninstall|status|run|test, got `{other}`")))
+                }
+            }
+        }
         Some("autostart") => match rest.get(1).copied() {
             Some("on") => Ok(Command::Autostart(Some(true))),
             Some("off") => Ok(Command::Autostart(Some(false))),
@@ -175,6 +193,7 @@ pub fn execute(command: &Command, camera: &mut dyn CameraDevice, out: &mut dyn W
         | Command::Record { .. }
         | Command::Autostart(_)
         | Command::Selftest
+        | Command::Vcam(_)
         | Command::List
         | Command::Gestures
         | Command::Help => Ok(()),

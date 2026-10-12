@@ -8,7 +8,7 @@ pub enum VideoMode {
     Whiteboard,
     Overhead,
     DeskView,
-    /// Candidate id; echoes on the 2C but needs a person in frame to verify.
+    /// Id and flag confirmed by driving the official controller (see the XU map).
     AutoFraming,
 }
 
@@ -31,7 +31,8 @@ impl VideoMode {
     pub const fn flag(self) -> u8 {
         match self {
             Self::DeskView | Self::AutoFraming => 0x10,
-            Self::Normal | Self::Whiteboard | Self::Overhead => 0x00,
+            Self::Whiteboard => 0x01,
+            Self::Normal | Self::Overhead => 0x00,
         }
     }
 
@@ -78,5 +79,6 @@ mod tests {
     fn deskview_requires_its_flag() {
         assert_eq!(VideoMode::DeskView.flag(), 0x10);
         assert_eq!(VideoMode::Normal.flag(), 0);
+        assert_eq!(VideoMode::Whiteboard.flag(), 0x01);
     }
 }

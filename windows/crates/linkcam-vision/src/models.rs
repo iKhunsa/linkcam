@@ -42,13 +42,19 @@ impl fmt::Display for ModelError {
 
 impl std::error::Error for ModelError {}
 
+impl ModelError {
+    pub(crate) fn new(message: &str) -> Self {
+        Self(message.to_string())
+    }
+}
+
 impl From<TractError> for ModelError {
     fn from(e: TractError) -> Self {
         Self(e.to_string())
     }
 }
 
-type Runnable = Arc<TypedRunnableModel>;
+pub(crate) type Runnable = Arc<TypedRunnableModel>;
 
 pub struct HandModels {
     palm: Runnable,
@@ -66,8 +72,8 @@ impl HandModels {
     /// Loads both models from `dir`.
     pub fn load(dir: &Path) -> Result<Self, ModelError> {
         Ok(Self {
-            palm: load_model(&dir.join(PALM_MODEL_FILE), PALM_INPUT)?,
-            landmarks: load_model(&dir.join(LANDMARK_MODEL_FILE), LANDMARK_INPUT)?,
+            palm: load_model(&dir.join(PALM_MODEL_FILE), [1, PALM_INPUT, PALM_INPUT, 3])?,
+            landmarks: load_model(&dir.join(LANDMARK_MODEL_FILE), [1, LANDMARK_INPUT, LANDMARK_INPUT, 3])?,
             anchors: palm_anchors(),
         })
     }
@@ -91,7 +97,7 @@ impl HandModels {
                 input.extend_from_slice(&image.sample(sx, sy));
             }
         }
-        let outputs = run(&self.palm, input, PALM_INPUT)?;
+        let outputs = run(&self.palm, [1, PALM_INPUT, PALM_INPUT, 3], input)?;
         let (boxes, scores) = split_palm_outputs(&outputs)?;
 
         let mut best: Option<(usize, f32)> = None;
@@ -153,7 +159,7 @@ impl HandModels {
                 input.extend_from_slice(&image.sample(sx, sy));
             }
         }
-        let outputs = run(&self.landmarks, input, LANDMARK_INPUT)?;
+        let outputs = run(&self.landmarks, [1, LANDMARK_INPUT, LANDMARK_INPUT, 3], input)?;
         let (coords, presence) = split_landmark_outputs(&outputs)?;
         if presence < HAND_PRESENCE_THRESHOLD {
             return Ok(None);
@@ -206,18 +212,20 @@ fn roi_from_palm(palm: &Palm, w: f32, h: f32) -> Roi {
     }
 }
 
-fn load_model(path: &Path, input_size: usize) -> Result<Runnable, ModelError> {
+/// Loads an ONNX model fixing its single input to `shape` (NHWC or NCHW).
+pub(crate) fn load_model(path: &Path, shape: [usize; 4]) -> Result<Runnable, ModelError> {
     tract_onnx::onnx()
         .model_for_path(path)
         .map_err(|e| ModelError(format!("{}: {e}", path.display())))?
-        .with_input_fact(0, f32::fact([1, input_size, input_size, 3]).into())?
+        .with_input_fact(0, f32::fact(shape).into())?
         .into_optimized()?
         .into_runnable()
         .map_err(Into::into)
 }
 
-fn run(model: &Runnable, data: Vec<f32>, size: usize) -> Result<Vec<Vec<f32>>, ModelError> {
-    let input = tract_ndarray::Array4::from_shape_vec((1, size, size, 3), data)
+/// Runs a model on `data` laid out as `shape`; returns every output flattened.
+pub(crate) fn run(model: &Runnable, shape: [usize; 4], data: Vec<f32>) -> Result<Vec<Vec<f32>>, ModelError> {
+    let input = tract_ndarray::Array4::from_shape_vec((shape[0], shape[1], shape[2], shape[3]), data)
         .map_err(|e| ModelError(e.to_string()))?;
     let outputs = model.run(tvec!(Tensor::from(input).into_tvalue()))?;
     outputs.iter().map(|t| Ok(t.to_plain_array_view::<f32>()?.iter().copied().collect())).collect()

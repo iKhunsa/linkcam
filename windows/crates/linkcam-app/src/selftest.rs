@@ -2,7 +2,7 @@
 //! reports PASS/FAIL per feature. Meant for checking a new machine/camera.
 
 use crate::service::{Event, Request, Service};
-use linkcam_core::config::Config;
+use linkcam_core::config::{AudioConfig, Config, EffectsConfig};
 use linkcam_core::{VideoFormat, VideoMode, ZoomUnits};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -95,17 +95,96 @@ pub fn run() -> bool {
         saved.as_deref().unwrap_or("timeout"),
     );
 
-    let video_path: PathBuf = std::env::temp_dir().join("linkcam-selftest.mp4");
-    service.send(Request::StartRecording(video_path.clone()));
-    std::thread::sleep(Duration::from_secs(RECORD_SECONDS));
-    service.send(Request::StopRecording);
-    let recorded = wait_for(&service, |e| match e {
-        Event::Notice(text) if text.starts_with("Saved") => Some(()),
+    ok &= record_and_check(&service, "recording (video + microphone)", "linkcam-selftest.mp4");
+
+    service.send(Request::SetAudio(AudioConfig { noise_reduction: true, ..AudioConfig::default() }));
+    ok &= record_and_check(&service, "recording (noise reduction)", "linkcam-selftest-nr.mp4");
+    service.send(Request::SetAudio(AudioConfig::default()));
+
+    // Software effects: the overlay text must show up in the delivered frames and
+    // the segmentation model must load and run without errors.
+    let effects = EffectsConfig {
+        blur_background: true,
+        overlay_enabled: true,
+        overlay_text: "LinkCam".into(),
+        ..EffectsConfig::default()
+    };
+    service.send(Request::SetEffects(effects));
+    let mut problem: Option<String> = None;
+    let overlay_seen = wait_for(&service, |event| match event {
+        Event::Error(text) => {
+            problem = Some(text.clone());
+            Some(false)
+        }
+        Event::Frame(frame) => has_overlay_in_corner(frame).then_some(true),
         _ => None,
     });
-    let size = std::fs::metadata(&video_path).map_or(0, |m| m.len());
-    ok &= report("recording", recorded.is_some() && size > 0, &format!("{} KB", size / 1024));
+    ok &= report(
+        "effects (blur + text overlay)",
+        overlay_seen == Some(true) && problem.is_none(),
+        problem.as_deref().unwrap_or(""),
+    );
+    service.send(Request::SetEffects(EffectsConfig::default()));
+
+    // Only one client may stream from the camera at a time.
+    drop(service);
+    ok &= gesture_engine_on_live_frames();
 
     report("overall", ok, "");
     ok
+}
+
+/// Runs the gesture engine on the camera's real frames and checks it keeps
+/// producing detection rounds without errors (a hand is not required).
+fn gesture_engine_on_live_frames() -> bool {
+    const ROUNDS_REQUIRED: usize = 5;
+    let config = Config { custom_gestures_enabled: true, ..Config::default() };
+    let service = Service::spawn(config, || {});
+    let mut rounds = 0;
+    let mut problem: Option<String> = None;
+    let finished = wait_for(&service, |event| {
+        match event {
+            Event::Pose(_) => rounds += 1,
+            Event::Error(text) => problem = Some(text.clone()),
+            _ => {}
+        }
+        (rounds >= ROUNDS_REQUIRED || problem.is_some()).then_some(())
+    });
+    let passed = finished.is_some() && problem.is_none();
+    let detail = problem.unwrap_or_else(|| format!("{rounds} detection rounds on live video"));
+    report("gesture engine (live)", passed, &detail)
+}
+
+/// True when the bottom-left corner holds both overlay colours (white fill, black outline).
+fn has_overlay_in_corner(frame: &linkcam_win::preview::Frame) -> bool {
+    const CORNER: usize = 40;
+    let mut white = false;
+    let mut black = false;
+    for y in frame.height.saturating_sub(CORNER)..frame.height {
+        for x in 0..CORNER.min(frame.width) {
+            let px = &frame.rgba[(y * frame.width + x) * 4..(y * frame.width + x) * 4 + 3];
+            white |= px == [255, 255, 255];
+            black |= px == [0, 0, 0];
+        }
+    }
+    white && black
+}
+
+/// Records a few seconds and checks the file holds both a video and an audio track.
+fn record_and_check(service: &Service, name: &str, file: &str) -> bool {
+    let path: PathBuf = std::env::temp_dir().join(file);
+    service.send(Request::StartRecording(path.clone()));
+    std::thread::sleep(Duration::from_secs(RECORD_SECONDS));
+    service.send(Request::StopRecording);
+    let saved = wait_for(service, |event| match event {
+        Event::Notice(text) if text.starts_with("Saved") => Some(()),
+        _ => None,
+    });
+    let size = std::fs::metadata(&path).map_or(0, |m| m.len());
+    let tracks = linkcam_win::record::describe_file(&path).unwrap_or((false, false));
+    report(
+        name,
+        saved.is_some() && size > 0 && tracks == (true, true),
+        &format!("{} KB, video={}, audio={}", size / 1024, tracks.0, tracks.1),
+    )
 }

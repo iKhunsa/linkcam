@@ -31,12 +31,19 @@ instead of `3610`/`-29491200`), so the control must be written
 
 | Mode | byte0 | byte1 written | Verified |
 |------|-------|---------------|----------|
-| Normal | `00` | `00` | yes — echoes `00 00` |
-| Whiteboard | `04` | `00` | accepted (echo `04`); marker/smart-whiteboard correction is host software, no visible change |
+| Normal | `00` | `00` | yes — echoes `00 00` (the official app leaves `00 10` after Auto Framing off) |
+| Whiteboard | `04` | `01` | **confirmed against the official controller** (clicking Whiteboard reads back `04 01`); needs the corner markers, so no visible change without them |
 | Overhead | `05` | `00` | yes — image rotates/rectifies, echoes `05` |
-| DeskView | `06` | `10` | yes — image rectified; flag `0x10` is required (`06 00` is rejected) |
-| Auto Framing (candidate) | `07` | `10` | echoes `07 10`; effect needs a person in frame — not visually verified |
+| DeskView | `06` | `10` | yes — confirmed in both our writes and the official controller (`06 10`) |
+| Auto Framing | `07` | `10` | **confirmed against the official controller** (clicking Auto Framing reads back `07 10`, off returns `00 10`). The framing itself needs a person in view |
 | Link 2 AI tracking | `01` | – | **rejected** on the 2C (`ff`) |
+
+### How the mapping was verified
+
+The official Link Controller was driven with synthetic clicks while `probe scan`
+captured every selector: with its preview streaming, Auto Framing → `07 10`,
+Whiteboard → `04 01`, DeskView → `06 10`. Selector 2 is the only one that changes
+(plus the detection-box selector, node 2 `0x18`, which is noise).
 
 ### Must be streaming
 
@@ -67,10 +74,16 @@ Other selectors touched by a mode change: node 1 `0x0b`, `0x19`, `0x1c`; node 2
 Reads `c4 01` (0x01c4) on this unit. Bit 8 is the AI-tracking bit on Link 2; on the
 2C its meaning is **unconfirmed**, so LinkCam never writes it.
 
+## Gesture checkboxes (official Settings → Gesture Control)
+
+Toggling *Auto Framing*, *Whiteboard* and *Zoom* gestures in the official app changes
+**no XU selector** (full scans before/after are identical apart from noise). Those switches
+are therefore app-side, so there is no firmware control to replicate.
+
 ## Not found / caveats
 
-* Gestures are recognised by the camera firmware (palm / V / L) and are not
-  exposed as events; custom gestures are therefore detected on the PC (`linkcam-vision`).
+* Gesture events are not exposed by the camera; custom gestures are detected on the PC
+  (`linkcam-vision`).
 * Selector `0x1a` (Link 2 live pan/tilt) ignores writes on the 2C.
 * Scans taken while the camera is idle only differ in the detection-box selector
   (node 2, `0x18`); see `idle-1.txt` vs `idle-2.txt`.

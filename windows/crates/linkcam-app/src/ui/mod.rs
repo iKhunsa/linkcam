@@ -31,6 +31,8 @@ pub struct LinkCamApp {
     current_format: Option<VideoFormat>,
     previewing: bool,
     recording_since: Option<Instant>,
+    virtual_camera_on: bool,
+    virtual_camera_installed: bool,
     pose: Option<Gesture>,
     last_fired: Option<(Instant, String)>,
     notice: Option<(Instant, String, bool)>,
@@ -56,6 +58,8 @@ impl LinkCamApp {
             current_format: None,
             previewing: true,
             recording_since: None,
+            virtual_camera_on: false,
+            virtual_camera_installed: linkcam_win::vcam::is_registered(),
             pose: None,
             last_fired: None,
             notice: None,
@@ -91,6 +95,10 @@ impl LinkCamApp {
                 }
                 Event::Image(values) => self.image_controls = values,
                 Event::Pose(pose) => self.pose = pose,
+                Event::VirtualCamera(on) => {
+                    self.virtual_camera_on = on;
+                    self.virtual_camera_installed = linkcam_win::vcam::is_registered();
+                }
                 Event::Recording(path) => {
                     self.recording_since = path.map(|_| Instant::now());
                 }

@@ -7,6 +7,7 @@ mod selftest;
 mod service;
 mod store;
 mod ui;
+mod vcam_cli;
 
 use cli::Command;
 use linkcam_core::gesture::Gesture;
@@ -79,6 +80,7 @@ fn run(command: Command) -> linkcam_core::Result<()> {
         }
         Command::Snap { path, format } => snap(path, format),
         Command::Formats => formats(),
+        Command::Vcam(action) => vcam_cli::run(action),
         Command::Autostart(change) => {
             if let Some(enabled) = change {
                 autostart::set_enabled(enabled)?;
@@ -185,6 +187,7 @@ fn record(seconds: u64, path: Option<String>) -> linkcam_core::Result<()> {
                 frame.width,
                 frame.height,
                 fps,
+                None,
             )?),
         };
         active.write_frame(&frame)?;

@@ -3,7 +3,7 @@
 use super::widgets::{section_title, status_dot};
 use super::{theme, LinkCamApp};
 use crate::service::Request;
-use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
+use eframe::egui::{self, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use linkcam_core::config::ScenePreset;
 use linkcam_core::units::ZoomRange;
 use linkcam_core::{ImageControl, VideoMode, ZoomUnits};
@@ -24,6 +24,8 @@ impl LinkCamApp {
             self.effects_section(ui);
             self.image_section(ui);
             self.overlays_section(ui);
+            self.virtual_camera_section(ui);
+            self.audio_section(ui);
         });
     }
 
@@ -136,10 +138,27 @@ impl LinkCamApp {
 
     fn effects_section(&mut self, ui: &mut Ui) {
         egui::CollapsingHeader::new("Effects").default_open(false).show(ui, |ui| {
-            ui.add_enabled(false, egui::Checkbox::new(&mut false, "Background blur"));
-            ui.add_enabled(false, egui::Checkbox::new(&mut false, "Background replace"));
-            ui.label(egui::RichText::new("Software effects are planned.").size(11.0).color(theme::MUTED));
+            let mut effects = self.config.effects.clone();
+            ui.checkbox(&mut effects.blur_background, "Background blur");
+            ui.add_enabled(
+                effects.blur_background,
+                egui::Slider::new(&mut effects.blur_strength, 1..=5).text("Strength"),
+            );
+            ui.label(
+                egui::RichText::new("Applied to the preview, snapshots and recordings.")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
+            self.commit_effects(effects);
         });
+    }
+
+    fn commit_effects(&mut self, effects: linkcam_core::config::EffectsConfig) {
+        if effects != self.config.effects {
+            self.config.effects = effects.clone();
+            self.service.send(Request::SetEffects(effects));
+            self.save_config();
+        }
     }
 
     fn image_section(&mut self, ui: &mut Ui) {
@@ -172,11 +191,56 @@ impl LinkCamApp {
         ui.add_space(2.0);
     }
 
+    fn audio_section(&mut self, ui: &mut Ui) {
+        egui::CollapsingHeader::new("Audio").default_open(false).show(ui, |ui| {
+            let mut audio = self.config.audio;
+            ui.checkbox(&mut audio.record_microphone, "Record microphone");
+            ui.add_enabled(
+                audio.record_microphone,
+                egui::Checkbox::new(&mut audio.noise_reduction, "Noise reduction"),
+            );
+            ui.add_enabled(
+                audio.record_microphone && audio.noise_reduction,
+                egui::Slider::new(&mut audio.noise_strength, 1.0..=3.0).text("Strength"),
+            );
+            ui.label(
+                egui::RichText::new("Applied to recordings; the live microphone is not rerouted.")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
+            if audio != self.config.audio {
+                self.config.audio = audio;
+                self.service.send(Request::SetAudio(audio));
+                self.save_config();
+            }
+        });
+    }
+
+    fn virtual_camera_section(&mut self, ui: &mut Ui) {
+        egui::CollapsingHeader::new("Virtual camera").default_open(false).show(ui, |ui| {
+            let mut on = self.virtual_camera_on;
+            let label = format!("Publish as \"{}\"", linkcam_core::vcam::CAMERA_NAME);
+            if ui.checkbox(&mut on, label).changed() {
+                self.service.send(Request::VirtualCamera(on));
+            }
+            let hint = if self.virtual_camera_installed {
+                "Other apps (Teams, Zoom, browsers) can pick it; effects and overlays are included."
+            } else {
+                "First use asks for administrator approval once to register the camera."
+            };
+            ui.label(egui::RichText::new(hint).size(11.0).color(theme::MUTED));
+        });
+    }
+
     fn overlays_section(&mut self, ui: &mut Ui) {
         egui::CollapsingHeader::new("Overlays").default_open(false).show(ui, |ui| {
-            ui.add_enabled(false, egui::Checkbox::new(&mut false, "Text overlay"));
-            ui.label(egui::RichText::new("Overlays are planned.").size(11.0).color(theme::MUTED));
+            let mut effects = self.config.effects.clone();
+            ui.checkbox(&mut effects.overlay_enabled, "Text overlay");
+            ui.add_enabled(
+                effects.overlay_enabled,
+                egui::TextEdit::singleline(&mut effects.overlay_text).hint_text("Text").desired_width(200.0),
+            );
+            self.commit_effects(effects);
         });
-        let _ = (Color32::WHITE, Pos2::ZERO);
     }
 }

@@ -31,6 +31,8 @@ linkcam snap [f.png] [4K30]     foto a resolución completa
 linkcam record <seg> [f.mp4]    graba H.264
 linkcam gestures                motor de gestos en consola
 linkcam autostart on|off|status iniciar con Windows
+linkcam vcam install|uninstall|status|run <s>|test   cámara virtual
+linkcam selftest                prueba de punta a punta de todo lo anterior
 linkcam list                    dispositivos de captura
 ```
 
@@ -41,15 +43,18 @@ linkcam list                    dispositivos de captura
 | Preview en vivo, selector de resolución 4K30 … 720p24 (modos nativos de la cámara) | ✅ |
 | Zoom 1×–4× (recorte real en cámara) | ✅ |
 | Modos DeskView / Overhead (cambian la imagen, restauran a normal) | ✅ |
-| Whiteboard (modo aceptado por la cámara; la corrección es software del oficial) | ⚠️ sin cambio visible |
-| Auto Framing (id 7 aceptado; requiere una persona en cuadro para verificar) | ⚠️ sin verificar |
+| Whiteboard (`04 01`, confirmado contra el controlador oficial; requiere los marcadores de esquina) | ✅ comando verificado |
+| Auto Framing (`07 10`, confirmado contra el controlador oficial; el encuadre necesita una persona) | ✅ comando verificado |
 | Brillo / contraste / saturación / nitidez / balance de blancos | ✅ |
 | Escenas guardadas (zoom + modo) | ✅ |
 | Foto a resolución completa, grabación H.264/MP4 | ✅ |
 | Gestos propios (mano → atajo / lanzar app / comando de cámara), editor en la GUI | ✅ validado con fotos reales de manos; **falta probarlo con tu mano en vivo** |
+| Efecto de fondo (desenfoque con segmentación de personas), texto superpuesto | ✅ en preview, fotos, grabaciones y cámara virtual |
+| Audio en grabaciones (micrófono de la cámara) + reducción de ruido (compuerta espectral) | ✅ pista AAC en el MP4; no reencamina el micrófono en vivo |
+| Cámara virtual «LinkCam Virtual Camera» (Windows 11, Media Foundation) | ✅ fuente de medios validada leyéndola con un `SourceReader`; **el registro COM necesita aprobar el aviso de administrador una vez** (`linkcam vcam install`) |
 | Pan / tilt digital | ❌ la firmware de la 2C ignora los controles UVC (ver `docs/xu-map-link2c.md`) |
-| Gestos de firmware (palma / V / L) | siempre activos en la cámara; no se pueden apagar desde aquí |
-| Efectos (fondo), overlays, cámara virtual, reducción de ruido del mic | ❌ no implementado (software del oficial) |
+| Interruptores de gestos del oficial (Auto Framing/Whiteboard/Zoom) | no cambian ningún selector XU: son de la app, no hay nada que replicar |
+| Reencaminar el micrófono en vivo con reducción de ruido | ❌ requeriría un driver de audio virtual |
 
 ## Gestos propios
 
@@ -84,6 +89,7 @@ crates/
   linkcam-win     DirectShow + IKsControl (XU), controles UVC, Media Foundation, SendInput
   linkcam-vision  detector de palma + landmarks, clasificador, despachador (hold/cooldown/swipe)
   linkcam-app     CLI + GUI egui + hilo de cámara
+  linkcam-vcam    DLL COM con la fuente de medios de la cámara virtual (cdylib)
 ```
 
 * La cámara se controla con `usbvideo` estándar: `IKsControl` sobre los 3 nodos de extensión.

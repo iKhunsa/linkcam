@@ -3,15 +3,19 @@
 //! messages with it, so COM never crosses threads.
 
 use crate::store;
-use linkcam_core::config::Config;
+use linkcam_core::audio::NoiseReducer;
+use linkcam_core::config::{AudioConfig, Config, EffectsConfig};
 use linkcam_core::gesture::{Action, Binding, CameraCommand, Gesture};
 use linkcam_core::{
     CameraDevice, CameraState, ControlValue, ImageControl, Result as CamResult, VideoFormat, VideoMode,
     ZoomUnits,
 };
-use linkcam_vision::{classify, Dispatcher, HandModels, ImageView};
+use linkcam_vision::effects::{blur_background, draw_text};
+use linkcam_vision::{classify, Dispatcher, HandModels, ImageView, Mask, PersonSegmenter};
+use linkcam_win::audio::MicCapture;
 use linkcam_win::preview::Frame;
 use linkcam_win::record::Recorder;
+use linkcam_win::vcam::{self, VirtualCamera};
 use linkcam_win::{keys, ComGuard, WinCamera};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
@@ -27,6 +31,14 @@ const GESTURE_STRIDE_IDLE: u32 = 6;
 const HAND_RECENT: Duration = Duration::from_millis(1500);
 /// Width the frame is reduced to before hand detection.
 const GESTURE_INPUT_WIDTH: usize = 480;
+/// Person segmentation runs on every Nth displayed frame; the mask is smoothed in between.
+const SEGMENT_EVERY_NTH_FRAME: u32 = 2;
+/// Width the frame is reduced to before segmentation.
+const SEGMENT_INPUT_WIDTH: usize = 320;
+/// Weight of a new mask when blending with the previous one.
+const MASK_SMOOTHING: f32 = 0.6;
+/// Text overlay scale = frame height / this (720p -> 3x).
+const OVERLAY_HEIGHT_PER_SCALE: usize = 240;
 /// Pause between attempts to find the camera.
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 /// Idle sleep when the preview is stopped.
@@ -40,10 +52,18 @@ pub enum Request {
     SetZoom(ZoomUnits),
     SetMode(VideoMode),
     SetFormat(VideoFormat),
-    SetImage { control: ImageControl, value: i32, auto: bool },
+    SetEffects(EffectsConfig),
+    SetAudio(AudioConfig),
+    SetImage {
+        control: ImageControl,
+        value: i32,
+        auto: bool,
+    },
     Snapshot(PathBuf),
     StartRecording(PathBuf),
     StopRecording,
+    /// Start or stop publishing to the virtual camera (installs it first if needed).
+    VirtualCamera(bool),
     GesturesEnabled(bool),
     Bindings(Vec<Binding>),
     Shutdown,
@@ -70,6 +90,8 @@ pub enum Event {
     },
     /// `Some(path)` while recording to `path`, `None` when stopped.
     Recording(Option<PathBuf>),
+    /// Whether frames are currently published to the virtual camera.
+    VirtualCamera(bool),
     Notice(String),
     Error(String),
 }
@@ -118,7 +140,13 @@ struct Worker {
     frame_counter: u32,
     formats_announced: bool,
     last_hand_seen: Option<Instant>,
+    segmenter: Option<PersonSegmenter>,
+    mask: Option<Mask>,
+    effect_frames: u32,
     recorder: Option<(Recorder, PathBuf)>,
+    mic: Option<MicCapture>,
+    reducers: Vec<NoiseReducer>,
+    virtual_camera: Option<VirtualCamera>,
 }
 
 /// Hand detection + dispatching, created on demand.
@@ -148,7 +176,13 @@ impl Worker {
             frame_counter: 0,
             formats_announced: false,
             last_hand_seen: None,
+            segmenter: None,
+            mask: None,
+            effect_frames: 0,
             recorder: None,
+            mic: None,
+            reducers: Vec::new(),
+            virtual_camera: None,
         }
     }
 
@@ -233,6 +267,16 @@ impl Worker {
             }
             Request::SetZoom(zoom) => self.report(camera.set_zoom(zoom), Event::State),
             Request::SetMode(mode) => self.report(camera.set_mode(mode), Event::State),
+            Request::SetAudio(audio) => {
+                self.config.audio = audio;
+                self.reducers.clear(); // rebuilt with the new strength on the next chunk
+            }
+            Request::SetEffects(effects) => {
+                self.config.effects = effects;
+                if !self.config.effects.blur_background {
+                    self.mask = None;
+                }
+            }
             Request::SetFormat(format) => {
                 self.config.preferred_format = Some(format);
                 match camera.set_format(format) {
@@ -252,6 +296,7 @@ impl Worker {
             Request::Snapshot(path) => self.snapshot(path, camera),
             Request::StartRecording(path) => self.start_recording(path, camera),
             Request::StopRecording => self.stop_recording(),
+            Request::VirtualCamera(on) => self.set_virtual_camera(on),
             Request::GesturesEnabled(on) => {
                 self.gestures_enabled = on;
                 self.config.custom_gestures_enabled = on;
@@ -290,15 +335,59 @@ impl Worker {
     }
 
     /// Saves a full-resolution frame (not the decimated preview).
-    fn snapshot(&self, path: PathBuf, camera: &mut WinCamera) {
+    fn snapshot(&mut self, path: PathBuf, camera: &mut WinCamera) {
         let message = match camera.full_resolution_frame() {
-            Ok(frame) => match linkcam_win::preview::save_png(&frame, &path) {
-                Ok(()) => format!("Saved {} ({}x{})", path.display(), frame.width, frame.height),
-                Err(error) => format!("Snapshot failed: {error}"),
-            },
+            Ok(mut frame) => {
+                self.apply_effects(&mut frame, true);
+                match linkcam_win::preview::save_png(&frame, &path) {
+                    Ok(()) => format!("Saved {} ({}x{})", path.display(), frame.width, frame.height),
+                    Err(error) => format!("Snapshot failed: {error}"),
+                }
+            }
             Err(error) => format!("Snapshot failed: {error}"),
         };
         self.emit(Event::Notice(message));
+    }
+
+    fn set_virtual_camera(&mut self, on: bool) {
+        if !on {
+            self.virtual_camera = None;
+            self.emit(Event::VirtualCamera(false));
+            return;
+        }
+        if self.virtual_camera.is_some() {
+            return;
+        }
+        let started = (|| {
+            if !vcam::is_registered() {
+                let exe = std::env::current_exe()
+                    .map_err(|e| linkcam_core::CameraError::ReadFailed(e.to_string()))?;
+                let dir = exe.parent().map(PathBuf::from).unwrap_or_default();
+                // One-time, user-approved administrator prompt.
+                vcam::register(&vcam::stage_dll(&dir)?)?;
+            }
+            VirtualCamera::start()
+        })();
+        match started {
+            Ok(camera) => {
+                self.virtual_camera = Some(camera);
+                self.emit(Event::VirtualCamera(true));
+                self.emit(Event::Notice(format!("{} is live", linkcam_core::vcam::CAMERA_NAME)));
+            }
+            Err(error) => {
+                self.emit(Event::VirtualCamera(false));
+                self.emit(Event::Error(format!("Virtual camera: {error}")));
+            }
+        }
+    }
+
+    fn publish_to_virtual_camera(&mut self, frame: &Frame) {
+        let Some(camera) = self.virtual_camera.as_mut() else { return };
+        if let Err(error) = camera.publish(&frame.rgba, frame.width, frame.height) {
+            self.virtual_camera = None;
+            self.emit(Event::VirtualCamera(false));
+            self.emit(Event::Error(format!("Virtual camera stopped: {error}")));
+        }
     }
 
     fn start_recording(&mut self, path: PathBuf, camera: &WinCamera) {
@@ -310,8 +399,14 @@ impl Worker {
             return;
         };
         let fps = camera.current_format().map_or(30, |f| f.fps);
-        match Recorder::create(&path, frame.width, frame.height, fps) {
+        // The microphone is optional: without it the recording is video only.
+        let mic =
+            if self.config.audio.record_microphone { MicCapture::start(MIC_NAME_PART).ok() } else { None };
+        let audio_format = mic.as_ref().map(MicCapture::format);
+        match Recorder::create(&path, frame.width, frame.height, fps, audio_format) {
             Ok(recorder) => {
+                self.mic = mic;
+                self.reducers.clear();
                 self.emit(Event::Recording(Some(path.clone())));
                 self.recorder = Some((recorder, path));
             }
@@ -320,6 +415,8 @@ impl Worker {
     }
 
     fn stop_recording(&mut self) {
+        self.pump_audio();
+        self.mic = None;
         let Some((recorder, path)) = self.recorder.take() else { return };
         let message = match recorder.finish() {
             Ok(()) => format!("Saved {}", path.display()),
@@ -327,6 +424,28 @@ impl Worker {
         };
         self.emit(Event::Recording(None));
         self.emit(Event::Notice(message));
+    }
+
+    /// Moves captured microphone audio into the recording, optionally denoised.
+    fn pump_audio(&mut self) {
+        let (Some(mic), Some((recorder, _))) = (self.mic.as_ref(), self.recorder.as_mut()) else { return };
+        let samples = mic.drain();
+        if samples.is_empty() {
+            return;
+        }
+        let channels = mic.format().channels as usize;
+        let audio = self.config.audio;
+        let cleaned = if audio.noise_reduction {
+            if self.reducers.len() != channels {
+                self.reducers = (0..channels).map(|_| NoiseReducer::new(audio.noise_strength)).collect();
+            }
+            denoise_interleaved(&samples, &mut self.reducers)
+        } else {
+            samples
+        };
+        if let Err(error) = recorder.write_audio(&cleaned) {
+            self.emit(Event::Error(format!("Audio write failed: {error}")));
+        }
     }
 
     fn publish_formats(&mut self, camera: &WinCamera) {
@@ -338,23 +457,81 @@ impl Worker {
         self.emit(Event::Formats { available, current: camera.current_format() });
     }
 
-    fn on_frame(&mut self, frame: Frame, camera: &mut WinCamera) {
+    fn on_frame(&mut self, mut frame: Frame, camera: &mut WinCamera) {
         if !self.formats_announced {
             self.publish_formats(camera);
         }
+        // Gestures look at the camera's own image, before any effect is applied.
+        self.frame_counter = self.frame_counter.wrapping_add(1);
+        let gesture_input = (self.gestures_enabled
+            && self.frame_counter.is_multiple_of(self.gesture_stride()))
+        .then(|| frame.downscaled(GESTURE_INPUT_WIDTH));
+
+        self.apply_effects(&mut frame, false);
         let frame = Arc::new(frame);
         self.last_frame = Some(frame.clone());
+        self.pump_audio();
         if let Some((recorder, _)) = self.recorder.as_mut() {
             if let Err(error) = recorder.write_frame(&frame) {
                 self.emit(Event::Error(format!("Recording stopped: {error}")));
                 self.stop_recording();
             }
         }
-        self.emit(Event::Frame(frame.clone()));
+        self.publish_to_virtual_camera(&frame);
+        self.emit(Event::Frame(frame));
 
-        self.frame_counter = self.frame_counter.wrapping_add(1);
-        if self.gestures_enabled && self.frame_counter.is_multiple_of(self.gesture_stride()) {
-            self.run_gestures(&frame, camera);
+        if let Some(small) = gesture_input {
+            self.run_gestures(small, camera);
+        }
+    }
+
+    /// Applies the enabled software effects in place. `fresh_mask` forces a
+    /// new segmentation (used for stills, where there is no previous frame).
+    fn apply_effects(&mut self, frame: &mut Frame, fresh_mask: bool) {
+        let effects = self.config.effects.clone();
+        if effects.blur_background {
+            if self.segmenter.is_none() && !self.load_segmenter() {
+                self.config.effects.blur_background = false;
+                return;
+            }
+            self.effect_frames = self.effect_frames.wrapping_add(1);
+            if fresh_mask || self.mask.is_none() || self.effect_frames.is_multiple_of(SEGMENT_EVERY_NTH_FRAME)
+            {
+                let small = frame.downscaled(SEGMENT_INPUT_WIDTH);
+                let view = ImageView { width: small.width, height: small.height, rgba: &small.rgba };
+                if let Some(Ok(mask)) = self.segmenter.as_ref().map(|s| s.mask(&view)) {
+                    match self.mask.as_mut() {
+                        Some(current) if !fresh_mask => current.blend_towards(&mask, MASK_SMOOTHING),
+                        _ => self.mask = Some(mask),
+                    }
+                }
+            }
+            if let Some(mask) = self.mask.as_ref() {
+                blur_background(&mut frame.rgba, frame.width, frame.height, mask, effects.blur_strength);
+            }
+        }
+        if effects.overlay_enabled && !effects.overlay_text.is_empty() {
+            let scale = (frame.height / OVERLAY_HEIGHT_PER_SCALE).max(1);
+            draw_text(&mut frame.rgba, frame.width, frame.height, &effects.overlay_text, scale, scale * 4);
+        }
+    }
+
+    fn load_segmenter(&mut self) -> bool {
+        let Some(dir) = store::model_dir(&self.config.model_dir) else {
+            self.emit(Event::Error(
+                "Segmentation model not found (models/*.onnx next to linkcam.exe)".into(),
+            ));
+            return false;
+        };
+        match PersonSegmenter::load(&dir) {
+            Ok(segmenter) => {
+                self.segmenter = Some(segmenter);
+                true
+            }
+            Err(error) => {
+                self.emit(Event::Error(format!("Could not load the segmentation model: {error}")));
+                false
+            }
         }
     }
 
@@ -365,12 +542,11 @@ impl Worker {
         }
     }
 
-    fn run_gestures(&mut self, frame: &Frame, camera: &mut WinCamera) {
+    fn run_gestures(&mut self, small: Frame, camera: &mut WinCamera) {
         if self.engine.is_none() && !self.load_engine() {
             self.gestures_enabled = false;
             return;
         }
-        let small = frame.downscaled(GESTURE_INPUT_WIDTH);
         let view = ImageView { width: small.width, height: small.height, rgba: &small.rgba };
 
         let Some(engine) = self.engine.as_mut() else { return };
@@ -424,6 +600,32 @@ impl Worker {
             }
         }
     }
+}
+
+/// Friendly-name fragment of the camera's built-in microphone.
+const MIC_NAME_PART: &str = "Insta360";
+
+/// Runs one reducer per channel over interleaved 16-bit PCM.
+fn denoise_interleaved(samples: &[i16], reducers: &mut [NoiseReducer]) -> Vec<i16> {
+    let channels = reducers.len();
+    let frames = samples.len() / channels;
+    let cleaned: Vec<Vec<f32>> = reducers
+        .iter_mut()
+        .enumerate()
+        .map(|(channel, reducer)| {
+            let mono: Vec<f32> =
+                (0..frames).map(|f| samples[f * channels + channel] as f32 / 32768.0).collect();
+            reducer.process(&mono)
+        })
+        .collect();
+    let produced = cleaned.iter().map(Vec::len).min().unwrap_or(0);
+    let mut out = Vec::with_capacity(produced * channels);
+    for index in 0..produced {
+        for channel in &cleaned {
+            out.push((channel[index].clamp(-1.0, 1.0) * 32767.0) as i16);
+        }
+    }
+    out
 }
 
 fn describe(action: &Action) -> String {

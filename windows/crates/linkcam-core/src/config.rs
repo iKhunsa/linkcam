@@ -21,6 +21,50 @@ impl Default for FirmwareGestures {
     }
 }
 
+/// Software effects applied to the preview, snapshots and recordings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EffectsConfig {
+    pub blur_background: bool,
+    /// 1 (light) ..= 5 (heavy).
+    pub blur_strength: u8,
+    pub overlay_enabled: bool,
+    pub overlay_text: String,
+}
+
+impl Default for EffectsConfig {
+    fn default() -> Self {
+        Self {
+            blur_background: false,
+            blur_strength: 3,
+            overlay_enabled: false,
+            overlay_text: "LinkCam".into(),
+        }
+    }
+}
+
+impl EffectsConfig {
+    pub fn any_active(&self) -> bool {
+        self.blur_background || (self.overlay_enabled && !self.overlay_text.is_empty())
+    }
+}
+
+/// Microphone options for recordings.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AudioConfig {
+    pub record_microphone: bool,
+    pub noise_reduction: bool,
+    /// Noise gate strength, 1.0 (mild) ..= 3.0 (strong).
+    pub noise_strength: f32,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self { record_microphone: true, noise_reduction: false, noise_strength: 2.0 }
+    }
+}
+
 /// A saved camera view ("Scene preset" in the official controller).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScenePreset {
@@ -37,7 +81,7 @@ impl ScenePreset {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub firmware_gestures: FirmwareGestures,
@@ -49,6 +93,8 @@ pub struct Config {
     pub model_dir: String,
     /// Stream format chosen by the user; `None` = automatic (about 720p).
     pub preferred_format: Option<VideoFormat>,
+    pub effects: EffectsConfig,
+    pub audio: AudioConfig,
 }
 
 impl Default for Config {
@@ -60,6 +106,8 @@ impl Default for Config {
             presets: Vec::new(),
             model_dir: String::new(),
             preferred_format: None,
+            effects: EffectsConfig::default(),
+            audio: AudioConfig::default(),
         }
     }
 }
@@ -112,6 +160,16 @@ mod tests {
         let parsed = Config::from_toml("custom_gestures_enabled = true").unwrap();
         assert!(parsed.custom_gestures_enabled);
         assert_eq!(parsed.bindings, default_bindings());
+    }
+
+    #[test]
+    fn effects_default_to_off_and_report_activity() {
+        let mut effects = EffectsConfig::default();
+        assert!(!effects.any_active());
+        effects.overlay_enabled = true;
+        assert!(effects.any_active());
+        effects.overlay_text.clear();
+        assert!(!effects.any_active());
     }
 
     #[test]

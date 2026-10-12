@@ -79,13 +79,16 @@ impl PreviewCapture {
     /// using the native mode closest to `wanted` (about 720p when `None`).
     pub fn open(name_part: &str, wanted: Option<VideoFormat>) -> Result<Self> {
         let mf = MediaFoundation::start()?;
-        let source = open_source(name_part)?;
+        let source = open_source(name_part, &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID)?;
 
         let mut attributes = None;
-        unsafe { MFCreateAttributes(&mut attributes, 1) }.map_err(fail("MFCreateAttributes"))?;
+        unsafe { MFCreateAttributes(&mut attributes, 2) }.map_err(fail("MFCreateAttributes"))?;
         let attributes: IMFAttributes = attributes.ok_or(CameraError::DeviceNotFound)?;
         unsafe { attributes.SetUINT32(&MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, 1) }
             .map_err(fail("reader attrs"))?;
+        // Software decoding: hardware MJPEG decoders are a shared, limited resource
+        // and fail with "lack of hardware resources" when other apps hold them.
+        unsafe { attributes.SetUINT32(&MF_SOURCE_READER_DISABLE_DXVA, 1) }.map_err(fail("reader attrs"))?;
         let reader = unsafe { MFCreateSourceReaderFromMediaSource(&source, &attributes) }
             .map_err(fail("MFCreateSourceReader"))?;
 
@@ -163,15 +166,13 @@ fn bgrx_to_rgba(bytes: &[u8], width: usize, height: usize, step: usize) -> Optio
     Some(Frame { width: out_w, height: out_h, rgba })
 }
 
-fn open_source(name_part: &str) -> Result<IMFMediaSource> {
+/// Opens the first capture device of `source_type` (video or audio) whose name matches.
+pub(crate) fn open_source(name_part: &str, source_type: &windows::core::GUID) -> Result<IMFMediaSource> {
     let mut attributes = None;
     unsafe { MFCreateAttributes(&mut attributes, 1) }.map_err(fail("MFCreateAttributes"))?;
     let attributes: IMFAttributes = attributes.ok_or(CameraError::DeviceNotFound)?;
-    unsafe {
-        attributes
-            .SetGUID(&MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID)
-    }
-    .map_err(fail("source type"))?;
+    unsafe { attributes.SetGUID(&MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, source_type) }
+        .map_err(fail("source type"))?;
 
     let mut devices: *mut Option<IMFActivate> = std::ptr::null_mut();
     let mut count = 0u32;

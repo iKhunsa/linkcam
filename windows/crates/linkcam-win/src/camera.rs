@@ -35,6 +35,7 @@ pub struct WinCamera {
     limits: PtzLimits,
     stream: Option<PreviewCapture>,
     preferred_format: Option<VideoFormat>,
+    video_source: String,
     formats: Vec<VideoFormat>,
     // Keeps the DirectShow filter (and thus the device) alive; dropped last.
     _filter: IBaseFilter,
@@ -59,6 +60,7 @@ impl WinCamera {
             limits,
             stream: None,
             preferred_format: None,
+            video_source: String::new(),
             formats: Vec::new(),
             _filter: filter,
         })
@@ -81,7 +83,8 @@ impl WinCamera {
     /// Starts the video stream if it is not running. Modes only apply while streaming.
     pub fn ensure_streaming(&mut self) -> Result<()> {
         if self.stream.is_none() {
-            let mut stream = PreviewCapture::open(VIDEO_SOURCE_NAME, self.preferred_format)?;
+            let source = if self.video_source.is_empty() { VIDEO_SOURCE_NAME } else { &self.video_source };
+            let mut stream = PreviewCapture::open(source, self.preferred_format)?;
             self.formats = stream.available_formats().to_vec();
             // The pipeline only runs once frames are being pulled.
             for _ in 0..STREAM_PRIME_FRAMES {
@@ -90,6 +93,13 @@ impl WinCamera {
             self.stream = Some(stream);
         }
         Ok(())
+    }
+
+    /// Captures from the device whose name contains `name` instead of the camera
+    /// (empty restores the default). Used to test the pipeline with a virtual camera.
+    pub fn set_video_source(&mut self, name: &str) {
+        self.video_source = name.to_string();
+        self.stream = None;
     }
 
     /// Chooses the stream format used from now on and restarts a running stream.

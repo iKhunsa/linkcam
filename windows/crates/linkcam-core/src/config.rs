@@ -102,6 +102,8 @@ pub struct Config {
     pub preferred_format: Option<VideoFormat>,
     pub effects: EffectsConfig,
     pub audio: AudioConfig,
+    /// Name fragment of the capture device used for video; empty = the Insta360 camera.
+    pub video_source: String,
 }
 
 impl Default for Config {
@@ -115,6 +117,7 @@ impl Default for Config {
             preferred_format: None,
             effects: EffectsConfig::default(),
             audio: AudioConfig::default(),
+            video_source: String::new(),
         }
     }
 }

@@ -22,23 +22,37 @@ USAGE:
   linkcam gestures                run the gesture engine in the console
   linkcam autostart on|off|status start LinkCam with Windows
   linkcam vcam install|uninstall|status|run <s>|test   virtual camera (Windows 11)
-  linkcam selftest                exercise mode/zoom/resolution/snapshot/recording
+  linkcam selftest [hand]         exercise mode/zoom/resolution/snapshot/recording
   linkcam help";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Gui,
-    Status { json: bool },
+    Status {
+        json: bool,
+    },
     Zoom(String),
     Pan(String),
     Tilt(String),
     Mode(VideoMode),
-    Image { control: ImageControl, value: ImageValue },
-    Snap { path: Option<String>, format: Option<String> },
+    Image {
+        control: ImageControl,
+        value: ImageValue,
+    },
+    Snap {
+        path: Option<String>,
+        format: Option<String>,
+    },
     Formats,
-    Record { seconds: u64, path: Option<String> },
+    Record {
+        seconds: u64,
+        path: Option<String>,
+    },
     Autostart(Option<bool>),
-    Selftest,
+    /// `true` runs only the hand-through-virtual-camera step.
+    Selftest {
+        hand_only: bool,
+    },
     Vcam(crate::vcam_cli::Action),
     List,
     Gestures,
@@ -94,7 +108,7 @@ pub fn parse(args: &[String]) -> Result<Command> {
             format: rest.get(2).map(|s| s.to_string()),
         }),
         Some("formats") => Ok(Command::Formats),
-        Some("selftest") => Ok(Command::Selftest),
+        Some("selftest") => Ok(Command::Selftest { hand_only: rest.get(1) == Some(&"hand") }),
         Some("vcam") => {
             use crate::vcam_cli::Action;
             match rest.get(1).copied() {
@@ -192,7 +206,7 @@ pub fn execute(command: &Command, camera: &mut dyn CameraDevice, out: &mut dyn W
         | Command::Formats
         | Command::Record { .. }
         | Command::Autostart(_)
-        | Command::Selftest
+        | Command::Selftest { .. }
         | Command::Vcam(_)
         | Command::List
         | Command::Gestures

@@ -4,6 +4,7 @@
 mod autostart;
 mod cli;
 mod selftest;
+mod selftest_hand;
 mod service;
 mod store;
 mod ui;
@@ -57,8 +58,8 @@ fn run(command: Command) -> linkcam_core::Result<()> {
     match command {
         Command::Gui => return run_gui(),
         Command::Gestures => return run_gestures_console(),
-        Command::Selftest => {
-            return if selftest::run() {
+        Command::Selftest { hand_only } => {
+            return if selftest::run(hand_only) {
                 Ok(())
             } else {
                 Err(linkcam_core::CameraError::ReadFailed("selftest failed".into()))
@@ -89,7 +90,7 @@ fn run(command: Command) -> linkcam_core::Result<()> {
             Ok(())
         }
         Command::Record { seconds, path } => record(seconds, path),
-        Command::Gui | Command::Gestures | Command::Selftest => Ok(()),
+        Command::Gui | Command::Gestures | Command::Selftest { .. } => Ok(()),
         other => {
             let mut camera = WinCamera::open()?;
             cli::execute(&other, &mut camera, &mut std::io::stdout())

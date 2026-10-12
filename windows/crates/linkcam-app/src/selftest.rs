@@ -36,7 +36,32 @@ fn report(name: &str, passed: bool, detail: &str) -> bool {
     passed
 }
 
-pub fn run() -> bool {
+/// Hand photo shipped next to the executable (`samples\\open_palm.jpg`).
+fn sample_photo() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let path = exe.parent()?.join("samples").join("open_palm.jpg");
+    path.is_file().then_some(path)
+}
+
+/// Pushes a real hand photo through the virtual camera and the whole app stack.
+fn hand_through_virtual_camera() -> bool {
+    match sample_photo() {
+        Some(photo) => {
+            let (passed, detail) = crate::selftest_hand::run(&photo);
+            report("gesture from a real hand photo (virtual camera)", passed, &detail)
+        }
+        None => report(
+            "gesture from a real hand photo (virtual camera)",
+            false,
+            "samples\\open_palm.jpg not found",
+        ),
+    }
+}
+
+pub fn run(hand_only: bool) -> bool {
+    if hand_only {
+        return hand_through_virtual_camera();
+    }
     let service = Service::spawn(Config::default(), || {});
     let mut ok = true;
 
@@ -129,6 +154,7 @@ pub fn run() -> bool {
     // Only one client may stream from the camera at a time.
     drop(service);
     ok &= gesture_engine_on_live_frames();
+    ok &= hand_through_virtual_camera();
 
     report("overall", ok, "");
     ok

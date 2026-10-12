@@ -205,6 +205,7 @@ impl Worker {
                 }
             };
             self.emit(Event::Connected { name: camera.info().name.clone() });
+            camera.set_video_source(&self.config.video_source);
             if let Some(format) = self.config.preferred_format {
                 let _ = camera.set_format(format);
             }

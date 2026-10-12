@@ -1205,6 +1205,7 @@ name = "linkcam-app"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "jpeg-decoder",
  "linkcam-core",
  "linkcam-vision",
  "linkcam-win",
